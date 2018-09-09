@@ -1,0 +1,93 @@
+
+# 之前已经加载好了y_train，表示训练出来的所有图片的分类
+# X_train的shape是（50000，32，32，3）
+# y_train的shape是（50000，1）
+# Visualize some examples from the dataset.
+# We show a few examples of training images from each class.
+classes = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+num_classes = len(classes)
+samples_per_class = 7
+for y, cls in enumerate(classes):
+	# 对每一个分类，取y, cls，它们的取值为 0, plane; 1, car; ...
+	# y_train == y返回一个01数组，np.flatnonzero提取其中的非0值的索引
+	# 即取划分到这个分类的所有图片的索引
+    idxs = np.flatnonzero(y_train == y)
+    # 参数意思分别 是从a 中以概率P，随机选择size=7个, 这里p没有指定，于是使用一致的分布
+    # replacement代表的意思是抽样之后还放不放回去，如果是False的话，那么出来的数都不一样
+    idxs = np.random.choice(idxs, samples_per_class, replace=False)
+    for i, idx in enumerate(idxs):
+    	# 放在第i列第y+1个
+        plt_idx = i * num_classes + y + 1
+        plt.subplot(samples_per_class, num_classes, plt_idx)
+        plt.imshow(X_train[idx].astype('uint8'))
+        plt.axis('off')
+        if i == 0:
+            plt.title(cls)
+plt.show()
+# 最终的含义就是，从每一个类别中随机挑出7幅图展示
+
+# Subsample the data for more efficient code execution in this exercise
+num_training = 5000
+mask = list(range(num_training))
+X_train = X_train[mask]
+y_train = y_train[mask]
+
+num_test = 500
+mask = list(range(num_test))
+X_test = X_test[mask]
+y_test = y_test[mask]
+# 以上代表数据集中取前5000和500个
+# 这种写法倒是也可以，但是不能直接切片吗？？？
+
+# Reshape the image data into rows
+X_train = np.reshape(X_train, (X_train.shape[0], -1))
+X_test = np.reshape(X_test, (X_test.shape[0], -1))
+print(X_train.shape, X_test.shape)
+# 这一句是把（50000，32，32，3）reshape成（50000，32*32*3）
+
+Inline Question #1: Notice the structured patterns in the distance matrix, where some rows or columns are visible brighter. (Note that with the default color scheme black indicates low distances while white indicates high distances.)
+
+What in the data is the cause behind the distinctly bright rows?
+What causes the columns?
+Your Answer: fill this in. 1、测试集X中的某个样本跟训练集X_train中的每个样本的距离都很大 2、训练集X_train中的某个样本跟测试集X中的每个样本的距离都很大/很小 那么它们应该是噪声？
+
+然后对训练集X_train和测试集X中的样本，两两匹配计算数据
+进行二维可视化，训练集为横轴、测试集为纵轴
+用颜色深度表示距离大小，越黑表示越近、越白表示越远
+得到黑白相间的网状图，白行和白列分别表示：
+1、测试集X中的某个样本跟训练集X_train中的每个样本的距离都很大
+2、训练集X_train中的某个样本跟测试集X中的每个样本的距离都很大/很小
+
+目前调用的函数是compute_distances_two_loops，要将它补全成
+for i in range(num_test):
+    for j in range(num_train):
+        # dists[i][j] = np.sqrt(np.sum(np.square(X[i].reshape(-1) - self.X_train[j])))，还可以直接写成
+        dists[i][j] = np.linalg.norm(X[i].reshape(-1) - self.X_train[j])
+# 如果不补全它，返回的距离就都是0；在训练集中取k个最近邻，就等于取前k幅图
+# 但是就算补全了，准确率仅为27.4%；k=5时的准确率比k=1略高，为27.8%
+# 查了一下，27.8%这个数据在不同人的电脑上结果都不同？？？只能确保它比27.4%略高
+
+Inline Question 2 We can also other distance metrics such as L1 distance. The performance of a Nearest Neighbor classifier that uses L1 distance will not change if (Select all that apply.):
+
+The data is preprocessed by subtracting the mean.
+The data is preprocessed by subtracting the mean and dividing by the standard deviation.
+The coordinate axes for the data are rotated.
+None of the above.
+Your Answer:3
+
+Your explanation:1错误，本来每个像素点都是255的图和都是0的图，现在做完变换后就都变成每个像素点都是0的图了；2错误，不妨假设图只有两个像素点，则无论什么图做完变换后就都会变成(-1,1)；3正确，当然需要测试集和训练集的图片都旋转一下，否则就错误
+
+补全compute_distances_one_loop
+dists[i, :] = np.linalg.norm(X[i, :].reshape(-1) - self.X_train, axis=1)
+# X[i, :].shape为（32，32，3），要reshape成32*32*3以后才能跟整个self.X_train（shape为5000，32*32*3）相加减
+# 使用切片的方法来免除一个循环；同时要写上axis=1，表示按行向量处理，求各个行向量的范数
+# 否则就是对整个矩阵求范数，结果是错误的
+
+补全compute_distances_no_loop
+不能再用切片的方法了，现在要使用数学方法来优化
+
+然后测试所用时间
+Two loop version took 57.565547 seconds
+One loop version took 57.411598 seconds
+No loop version took 0.463298 seconds
+前两个因为换汤不换药，所需时间是一样的；而no_loop的数学优化将速度提高了两个数量级！！！
