@@ -1,0 +1,21 @@
+初始化的时候对loss有一个sanity check，估计为-log(0.1)
+因为初始化是随机的，并且一共有10个类，所以正确预测类数的可能性是1/10，那么损失将是-log(0.1)
+实际上，因为随机初始化，每次得到的真实的loss会变化，在2.3～2.4的范围内；预估的确是对的
+
+实际检测：就使用一个softmax损失函数进行分类
+softmax不仅可以用在神经网络的最后一层作为激励函数
+它跟感知机、使用hinge loss的svm一样，本身就能达到一定的分类效果
+lr 1.000000e-07 reg 2.500000e+04 train accuracy: 0.345735 val accuracy: 0.362000
+lr 1.000000e-07 reg 5.000000e+04 train accuracy: 0.326980 val accuracy: 0.340000
+lr 5.000000e-07 reg 2.500000e+04 train accuracy: 0.336939 val accuracy: 0.352000
+lr 5.000000e-07 reg 5.000000e+04 train accuracy: 0.324633 val accuracy: 0.347000
+best validation accuracy achieved during cross-validation: 0.362000
+
+因为前向传播和反向传播就算在naive的方法里，就要用到矩阵运算
+用到循环的地方不多，所以加速的提升空间不大
+naive loss: 2.320011e+00 computed in 0.010500s
+vectorized loss: 2.320011e+00 computed in 0.009254s
+Loss difference: 0.000000
+Gradient difference: 0.000000
+
+softmax on raw pixels final test set accuracy: 0.351000
