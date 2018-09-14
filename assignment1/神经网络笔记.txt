@@ -1,0 +1,40 @@
+exp_scores = np.exp(scores-np.max(scores, axis=1, keepdims=True))
+先同时减去最大的得分再求指数，防止溢出
+# correct_logprobs = -probs[range(N),y] * np.sum(np.log(probs), axis=1)
+我以为是softmax交叉熵损失：-ti ∑ log yi foreach yi
+但是结果跟答案不一致。网上给出的loss是：
+correct_logprobs = -np.log(probs[range(N),y])
+即-∑ log ti。但是这样算出来的结果还是有误差，不知道怎么回事？？？
+data_loss = np.sum(correct_logprobs)/N
+reg_loss = 0.5 * reg * ( np.sum(W1*W1) + np.sum(W2*W2) )
+loss = data_loss + reg_loss
+
+反向传播部分
+delta3 = np.zeros_like(probs)
+delta3[np.arange(N), y] -= 1 # 正确分类处需要-1
+delta3 += probs
+grads['W2'] = hidden_layer.T.dot(delta3) / N + reg * W2 # 注意还有正则化项
+grads['b2'] = np.sum(delta3, axis=0) / N
+
+da2_dz2 = np.zeros_like(hidden_layer)
+da2_dz2[hidden_layer>0] = 1 # relu的导数
+delta2 = delta3.dot(W2.T) * da2_dz2
+grads['W1'] = X.T.dot(delta2) / N + reg * W1 # 注意还有正则化项
+grads['b1'] = np.sum(delta2, axis=0) / N
+
+进行测试：准确率还是很低
+Validation accuracy:  0.29
+这说明超参数选的不好
+查看可视化部分，我们看到损失算是呈线性下降，没有放缓的趋势，这似乎表明学习率可能太低
+此外，训练集和验证集的准确率没有差距，这表明模型具有较低的容量，我们应该增加其规模！！！
+理应出现过拟合，使得训练集的准确率明显高于验证集
+
+目标应该是在验证集上实现大于48％的分类准确度
+可选的超参数有：
+hidden_size_choice
+learning_rate_choice
+reg_choice
+batch_size_choice
+num_iters_choice
+最好的网络在验证集上超过52％
+Test accuracy:  0.543
