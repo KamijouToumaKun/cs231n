@@ -1,0 +1,108 @@
+SVM除了training（49000）、validation（1000）、test（1000）三个集以外
+还设置了一个development集。它是training集的一个小的子集，用于代码加速？？？
+
+然后，用np.mean(axis=0)计算出平均图像
+
+X_train.shape本来是（49000，3072）
+X_train = np.hstack([X_train, np.ones((X_train.shape[0], 1))])
+现在变成了（49000，3073）：在W中加了一维1作为偏置项
+这样X到超平面W的距离公式就可以直接表示成WX/L2(W)
+
+假设有C个分类
+实际上，w的shape = （D，C），它其实是C个SVM的组合
+X点乘W得到的是C个打分
+查看C-1个错误分类（sj）的得分，它们如果比正确分类得分（syi）高，超过的部分就是loss
+
+hinge function（折叶函数）：max(0, delta-m)，它随m的变化图像像一个135度的折页
+hinge loss（折叶损失），用于最大间隔分类
+∑ max(0, delta + sj - syi) for j != yi
+目标：loss = 0，这时syi >= sj + delta，即正确分类得分比错误分类得分高至少delta
+这里取delta = 1
+
+梯度计算：对于给定的i
+loss = 1/N ∑ max(0, delta + (X[i]W)[:,j] - (X[i]W)[:,y[i]]) for j != y[i]
++ 正则化项
+当delta + (X[i]W)[:,j] - (X[i]W)[:,y[i]] > 0时
+delta + (X[i]W)[:,j] - (X[i]W)[:,y[i]]
+对W[t,j]求导，得到X[i][t]；所以对W[:,j]求导，得到X[i,:]
+	dW[:,j] += X[i,:].T表示，dW的这一列 += X[i].T
+对W[t,y[i]]求导，得到-X[i][t]；所以对W[:,y[i]]求导，得到-X[i,:]
+	dW[:,y[i]] -= X[i,:].T表示，dW的这一列 -= X[i].T
+这跟多类感知机差不多啊！
+参考答案：https://blog.csdn.net/silent_crown/article/details/78109461
+而跟普通二分类的SVM不一样；以往要解决二分类的SVM，要计算超平面的距离最优化
+需要除以L2(W)而这里不需要，因此求最优解避免了复杂的数学知识
+
+然后对loss求平均（而不是直接求和？？？）再加上正则化项
+loss += 0.5*reg * np.sum(W * W)
+这里用*表示直接对应相乘而不是矩阵乘法
+同样对W[t,j]求导，得到reg*W[t,j]；所以对W[:,:]求导，得到reg*W[:,:]
+
+改用向量化处理进行加速：
+scores = X.dot(W)
+得到一个（N，C）的矩阵scores
+correct = scores[np.arange(X.shape[0]),y]
+这一句可以直接取scores[0,y[0]; 1,y[1]; ...]，得到N个分散的数据
+correct = np.reshape(correct,(X.shape[0],1))
+然后再用一个reshape（注意，直接.T转置是不行的），得到（N，1）的correct
+s_l = scores - correct + 1.0
+s_l[np.arange(X.shape[0]),y] = 0.0
+s_l[s_l<=0] = 0.0
+相减之后，将y[i]=j的地方置0（本来是1），再将小于0的部分置0，就得到结果矩阵
+
+而梯度计算部分，原来遍历每一个i和每一个错误分类j，如果margin>0
+dW[:,j] += X[i,:].T：在错误的地方+1
+dW[:,y[i]] -= X[i,:].T：在正确的地方-1。这有点像一个“零和博弈”
+这里先用一句s_l[s_l>0] = 1.0，把所有错误分类&margin>0的地方都标成1
+row_sum = np.sum(s_l, axis=1)，对于每一行求和
+也就是对每一个i，求所有错误分类&margin>0的总数。shape为（N，1）
+s_l[np.arange(X.shape[0]),y] = -row_sum
+然后取反，标在正确分类的地方（现在s_l的每一行之和都是0）
+dW += np.dot(X.T,s_l)/X.shape[0] + reg*W
+再用X.T点乘s_l即可
+
+检验：loss和梯度的结果都正确，而速度快了2个数量级
+Naive loss and gradient: computed in 0.157324s
+Vectorized loss and gradient: computed in 0.007656s
+difference: 0.000000
+
+inline question 1：
+看了别人的答案，大部分数据的误差在1e-10量级或者更小，但是会有一两个在1e-3的量级
+他们认为这是因为hinge函数的导数不连续：
+偶尔会有数据刚好在拐点上，因为计算误差，根据一种计算方法，数据在拐点偏左处，另一种计算使得数据在拐点偏右处
+于是导数一个为-1，一个为0，从而不match了
+
+随机梯度下降：
+sample_index = np.random.choice(num_train, batch_size, replace=False)
+X_batch = X[sample_index, :]   # select the batch sample
+y_batch = y[sample_index]      # select the batch label
+
+准确率：比knn高了一些，但是还是低
+training accuracy: 0.380653
+validation accuracy: 0.392000
+
+调参：
+learning_rates = [1e-7, 5e-5]
+regularization_strengths = [2.5e4, 5e4]
+为什么可选的两个学习率都这么小，正则化系数都这么大啊？？？
+最后报错 assignment1/cs231n/classifiers/linear_svm.py:83: RuntimeWarning: overflow encountered in double_scalars
+loss += np.sum(s_l)/X.shape[0] + 0.5*reg*np.sum(W*W)
+这个问题我没有找到怎么解决；但是结果是正确的
+lr 1.000000e-07 reg 2.500000e+04 train accuracy: 0.385286 val accuracy: 0.386000
+lr 1.000000e-07 reg 5.000000e+04 train accuracy: 0.361306 val accuracy: 0.359000
+lr 5.000000e-05 reg 2.500000e+04 train accuracy: 0.138735 val accuracy: 0.140000
+lr 5.000000e-05 reg 5.000000e+04 train accuracy: 0.100265 val accuracy: 0.087000
+best validation accuracy achieved during cross-validation: 0.386000
+
+调参结果可视化：
+横纵轴是学习率和正则化系数取对数
+colors = [results[x][0] for x in results]
+plt.scatter(x_scatter, y_scatter, marker_size, c=colors)
+plt.colorbar()
+结果在训练集/验证集上的准确率越高，颜色越淡
+
+学习结果可视化：
+把最佳的一组参数去掉bias，reshape成图片大小，画出来
+inline question 2：
+可以看到这组参数因为更关注图片的哪些部位，才能把不同类的图片之间划分出更大的间隔
+至少可以看到，都更关注图片的偏中心部分
