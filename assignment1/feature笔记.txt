@@ -1,0 +1,48 @@
+特征提取：从rgb到方向+颜色直方图
+
+hog：方向梯度直方图
+其本质为：梯度的统计信息，而梯度主要存在于边缘的地方。
+Hog特征结合SVM分类器已经被广泛应用于图像识别中，尤其在行人检测中获得了极大的成功。
+实现方法：
+首先将图像分成小的连通区域，这些连通区域被叫做细胞单元。然后采集细胞单元中各像素点的梯度的或边缘的方向直方图。最后把这些直方图组合起来，就可以构成特征描述符。
+
+color histogram：颜色直方图
+
+类似于词袋模型，完全不在乎点的排列顺序
+只把每个像素点的取值（0～255）进行频率统计，表示成字典/直方图，作为特征
+这样对于对象的姿势和方向不同就不会很敏感
+
+可以将一个区间段的像素点归一到同一个类
+这有点类似于贝叶斯方法，也需要将像素点的取值离散化，否则样本会过于稀疏
+features.py中的color_histogram_hsv方法就是做这件事的
+1、先把rgb图转成hsv：色调+饱和度+明度
+	RGB和CMY颜色模型都是面向硬件的，而HSV（Hue Saturation Value）颜色模型是面向用户的
+	更能体现人眼感受到的图片之间的差异
+2、调用np.histogram函数
+imhist, bin_edges = np.histogram(hsv[:,:,0], bins=bins, density=normalized)
+	举例：np.histogram(np.arange(4), bins=np.arange(5), density=True)
+	(array([ 0.25,  0.25,  0.25,  0.25]), array([0, 1, 2, 3, 4]))
+3、然后imhist = imhist * np.diff(bin_edges)
+	相当于[0.25, 0.25, 0.25, 0.25] 与 [1, 1, 1, 1]对应相乘
+不得不说numpy这个包真是方便啊，可以这样流畅地完成频率统计
+
+然后把直方图归一化：减去平均值再除以标准差，作为特征
+官方给的几个超参数也许还不够，再增加几个
+regularization_strengths = [5e3, 5e4, 5e5, 5e6, 1e7]
+learning_rates = [5e-9, 5e-8, 5e-7, 5e-6]
+官方表示验证集上的准确率最高可以达到0.44，我没有找到这么高的
+lr 1.000000e-08 reg 5.000000e+06 train accuracy: 0.420633 val accuracy: 0.421000
+
+print(test_accuracy)
+0.426
+这比起直接用rgb进行svm，结果要高了一些
+
+再拿到两层的神经网络中去实验
+最后准确率达到
+best_acc: 0.59
+best learning_rate: 1.7
+best reg: 0.001
+注意，iteration次数太多（超过1500）时，loss反而变大了
+
+print(test_acc)
+0.576
