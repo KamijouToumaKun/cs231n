@@ -1,0 +1,84 @@
+各种激活函数的对比
+参看https://www.v2ex.com/t/340003
+
+∂error/∂w = ∂error/∂out ∂out/∂net ∂net/∂w
+
+1）error = 1/2 (target-out)^2（如果是批量化的，还要除以样本数N）
+∂error/∂out = -(target-out)（如果是批量化的，还要除以样本数N）
+也许还有正则化项：1/2 reg w^2
+还要加上reg w
+-(target-out)的本质不是直接作差，而是平方误差的导数
+
+2）对sigmoid求导，out = 1 / 1+e^(-net)
+∂out/∂net = ... = out(1-out)
+sigmoid的问题一：
+假设没有再上一层了，即net就是输入，且绝对值比较大（比如+-10）
+那么net=-10时，out很接近0；net接近10时，out很接近1
+都会使得导数接近0：“梯度流消失”（vanishing gradient），饱和
+
+而对relu求导，out = 0(net<0), net(net>=0)
+∂out/∂net = 0(net<0), 1(net>=0)
+
+3）net = w 上一层out + b
+∂net/∂w = 上一层out
+∂net/∂b = 1
+
+4）最后把以上三者相乘
+
+输入大小为(N,D1)（N是batch的大小，D代表每个数据的维度数）
+*W1(D1,D2) => (N,D2)，+b1(D2)，得到net1(N,D2)
+再激活，得到out1(N,D2)
+*W2(D2,D3) => (N,D3)，+b2(D3)，得到net2=out2(N,D3)
+（再取最大值得到N个分类）
+
+反向传播：先求出∂error/∂out2(N,D3)
+因为最后一层没有激活，它就相当于∂error/∂net2：设为delta（又称梯度）
+这一层还能看到的东西有：out1和由out1算出的导数∂out1/∂net1、W2和b2
+a）out1^T(D2,N) delta=∂error/∂net2(N,D3) 除以N求平均 => (D2,D3)，加给W2
+b）delta=∂error/∂net2(N,D3) 对N求平均 => (D3)，加给b2
+c）delta=∂error/∂net2(N,D3) W2^T(D3,D2) => (N,D2)
+再跟由out1算出的激活的导数∂out1/∂net1(N,D2)对应相乘
+作为上一层的∂error/∂net1。如此迭代
+
+sigmoid的问题二：不是zero-center的
+out的值永远属于0～1、导数∂out1/∂net1也恒正
+如果一开始的输入，即x = 第一个net也是全正的
+∂error/∂out
+∂out/∂net = out(1-out)，恒正
+∂net/∂w = 上一层out，恒正
+
+那么，一个error的反向传播会使所有权重w、偏置b一起增加或者一起减少
+但是，如果实际上要让w的部分维增加、部分维减少
+比如那张zigzag图，假如w只有二维，从(0,0)开始训练，要收敛到二/四象限而不是一三
+那么比起使用relu，sigmoid的训练会走很多弯路
+据说如果使用批量化训练（即N不取1），这个问题会有改观
+又或者，让一开始的输入，即x = 第一个net是0均值的
+又或者，改用tanh
+
+sigmoid的问题三：指数函数有一定的计算代价（尽管比起大量的矩阵运算，也不算什么）
+
+ReLU = Rectified Linear Unit（AlexNet使用）
+计算速度快；同样有着生物学意义，而且根据研究，它收敛更快
+但是，ReLU也不是zero-center的
+而且，在x<0的时候硬饱和（dead），x>=0的时候都不饱和（active）
+实际操作中，如果你的learning rate 很大，那么很有可能你网络中的40%的神经元都”dead”了：
+∂out/∂net = 0(net<0), 1(net>=0)
+比如，上一层的输入全是正的，而上一层的W被猛地一下全部更新成了负值
+于是得到的net从此是负的了，于是∂out/∂net从此都是0了
+
+给出了一张data cloud图和两个超平面，这两个超平面是怎么算出来的呢？？？
+一个平面划分开dead ReLU与否、一个平面划分开active ReLU与否
+解决方法：不要让b的初始值全是0，这样得到的net也全是0，∂out/∂net = 0
+让b的初始值是一个小的正值（这一点有争议）
+
+其他变体：
+Leaky-ReLU：max(0.01x, x)
+PReLU：参数整流器（Parametric Rectifier Linear Unit）
+max(alpha x, x)：alpha也是一个参数，不用硬编码它（hard-code it）
+具体怎么训练它呢？？？每个神经元各有一个alpha吗？？？
+
+ELU：Exponential Linear Unit
+x(x>0)；alpha(e^x-1)(x<=0)。负数区域也接近饱和
+
+MaxOut：max(w1^T x + b1, w2^T x + b2)
+训练两套w和b，选一套大的输出
