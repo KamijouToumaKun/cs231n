@@ -1,0 +1,153 @@
+在最开始，显示如下信息：
+run the following from the cs231n directory and try again:
+python setup.py build_ext --inplace
+You may also need to restart your iPython kernel
+我一开始没有理会，结果在Batchnorm for deep networks处出了BUG：
+第一轮没有问题，但是到了第二轮，X要点乘权重W1时，报错说NoneType不可以乘
+查看发现，self.params中'W1'等key值存在，但是self.params['W1']等value都成了None
+最后定位到solver.py文件中的这一句上面：
+next_w, next_config = self.update_rule(w, dw, config)
+self.update_rule函数的第一个返回值是None，于是更新后的next_w成了None
+
+1、首先怀疑，这不是自己的代码写错了导致的，而是因为最开始那个东西没有正确引入？
+按照提示，在内层的cs231n目录下运行命令，又提示我说没有安装Cython
+于是还得pip3 install Cython
+然后python3 setup.py build_ext --inplace（这里python也要改成python3）
+但是结果还是错误的……
+
+2、在全连接那一节里出现了同样的问题，当时的解决方法是：
+w = w.reshape(dw.shape[0], -1)，加了这一句，才能让update_rule成功work
+否则，因为w和dw的shape不一定相同：比如w.shape是(100,)，dw.shape是(1,100)
+报错ValueError: non-broadcastable output operand with shape (100,) doesn't match the broadcast shape (1,100)
+但是，也有可能w.shape和dw.shape都是(100,)
+在reshape之后，w.shape变成了(100,100)，反而变得不同了。于是又改成了
+if w.shape != dw.shape:
+    w = w.reshape(dw.shape[0], -1)
+在shape这个东西上老是出问题，非常烦人
+
+首先补充完cs231n/layers.py的batchnorm_forward函数
+在参数bn_param中提供running_mean和running_val，即以往的平均值和方差；
+现在从参数x，即当前的batch中也可以计算出平均值和方差，sample_mean和sample_var
+还不知道全局的平均值和方差
+
+1、train模式中，用sample_mean和sample_var将x归一化，并保存在out中
+注意除以的是np.sqrt(sample_var + eps)
+然后再乘gamma（注意是对应元素相乘！），加上beta
+2、train模式中，用sample_mean和sample_var更新running_mean和running_val
+要用新batch的平均值和方差，来修正当前全局的平均值和方差
+注意给了一个参数momentum: Constant for running mean / variance
+这跟最优化问题中的动量的概念；那个动量只包含一个超参数rho，代表摩擦系数
+running_mean = momentum * running_mean + (1 - momentum) * sample_mean
+running_var = momentum * running_var + (1 - momentum) * sample_var
+3、test模式中，改用running_mean和running_val将x归一化
+现在得到的running_mean和running_val是真正的全局平均值和方差；但不能保证大概归一到-1～1了
+
+注意，这也就是说，train和test模式下的公式不同！！！
+
+怎么推导出来的？？？之前处理的数据有M个，当前batch有N个
+
+D(X) = E(X^2)-(EX)^2
+D(Y) = E(Y^2)-(EY)^2
+
+E(X,Y) = (E(X)*N + E(Y)*M) / (M+N)
+D(X,Y) = (E(X^2) * N + E(Y^2) * M) / (N+M) - E(X,Y)^2
+
+E(X,Y)*(M+N) = (E(X)*N + E(Y)*M)
+D(X,Y)*(M+N) = (D(X)+(EX)^2) * N + (D(Y)+(EY)^2) * M - E(X,Y)^2 * (M+N)
+= (D(X)+(EX)^2) * N + (D(Y)+(EY)^2) * M - (E(X)*N + E(Y)*M)^2 / (M+N)
+D(X,Y)*(M+N)^2 = E(X^2) * N(N+M) + E(Y^2) * M(N+M) - (E(X)*N + E(Y)*M)^2
+
+SO???
+E(X,Y) = E(Y)/D(Y) * E(Y) + (1-E(Y)/D(Y)) * E(X)
+D(X,Y) = E(Y)/D(Y) * D(Y) + (1-E(Y)/D(Y)) * D(X)
+
+然后是推导反向传播
+详见https://blog.csdn.net/yuechuen/article/details/71502503
+gamma.shape (D,)
+x.shape和x_normalized.shape (N,D)
+beta.shape (D,)
+out.shape (N,D)
+根据shape就不会记混了
+
+1、out = gamma*x_normalized + beta
+dbeta = np.sum(dout, axis=0)，同样只跟dout有关
+dgamma = np.sum(dout*x_normalized)，同样跟dout和 x_normalized有关
+dx_normalized = dout*gamma；这里都是元素对应相乘
+本质是，∂L/∂x_normalized = ∑ ∂L/∂out ∂out/∂x_normalized
+= ∑ dout * gamma
+
+但是注意，要计算的是dx，这里算出来的是dx_normalized
+于是，这里还要计算dsample_var和dsample_mean！
+
+∂L/∂sample_var = ∑ ∂L/∂out ∂out/∂x_normalized ∂x_normalized/∂sample_var
+由于x_normalized = (x-sample_mean) / np.sqrt(sample_var + eps)
+= ∑ dout * gamma * （-0.5 * (x-sample_mean) / (sample_var+eps)^1.5)
+这里，∂(x-sample_mean)/∂sample_var是0？x-sample_mean对于sample_var来说是无关常数？？？
+所以，得到dsample_var
+
+2、∂L/∂sample_mean = ∂L/∂out ∂out/∂x_normalized ∂x_normalized/∂sample_mean
++ ∂L/∂out ∂out/∂sample_var ∂sample_var/∂sample_mean
+
+完全不懂……
+
+  dsample_mean = np.sum(-1/np.sqrt(sample_var+eps)* dx_normalized, axis = 0)
+   + 1.0/N*dsample_var *np.sum(-2*(x-sample_mean), axis = 0) 
+
+3、
+  dx = 1/np.sqrt(sample_var+eps) * dx_normalized + dsample_var*2.0/N*(x-sample_mean) + 1.0/N*dsample_mean
+
+结果的图显示，使用批量归一化的效果比不使用好
+loss下降更快，训练集和测试集上acc更高
+
+
+
+然后是参数初始化的问题
+同样是三个指标：loss谁更低，训练集和测试集上acc谁更高。图显示
+1、在初始初始权重较小（1e-4～1e-2）的时候，归一化的指标较好，好于不归一化
+说明：归一化的作用
+2、在初始权重恰当（1e-2～1e-1）的时候，归一化和不归一化的指标都较好
+在1e-1的时候，不归一化的指标甚至反超了归一化
+说明：初始权重的选择更加重要。全连接那一节里同样证实了初始权重恰当的重要性，让小数据集迅速过拟合。
+3、在初始权重过大（1e-1～1e0）的时候，归一化和不归一化的指标都迅速变差，归一化略好
+loss迅速变大，不归一化的loss甚至成竖直直线上升。
+说明：初始权重数量级过大导致loss过大，训练难以让其恢复。
+
+然后是batch size的问题，对比了四种选择
+No normalization: batch size =  5
+Normalization: batch size =  5
+Normalization: batch size =  10
+Normalization: batch size =  50
+结果：batch size=5，归一化；batch size=5，不归一化，两者为较低一档
+batch size=10，归一化；batch size=50，归一化，两者为较高一档
+
+1、在训练集上的acc
+同样归一化，batch size=5 < 10 < 50
+batch size=5的归一化 < 不归一化
+说明：1）归一化不一定比不归一化收敛更快？？？需要batch size较大的时候才可能有用！
+2）batch size大一些更能接近全局的梯度，比随机梯度下降（SGD）更好
+2、在验证集上的acc，相对比较接近
+不归一化 < batch size=5/50 < batch size=10
+说明：1）批量处理也是一种正则化手段，不过要选择合适的size
+2）归一化也是一种正则化手段？？？
+
+是的，归一化不一定比不归一化收敛更快？？？需要batch size较大的时候才可能有用！
+但是，有时候因为硬件问题，batch size有限，所以归一化不一定有用
+Layer Normalization：不是把输出归一化，而是把特征归一化：
+不是数据之间求平均；而是对一个D维数据，将每一维之间求平均
+感觉没道理啊……
+
+问题3：
+哪些数据预处理步骤类似于批量归一化，哪种类似于层归一化？
+缩放数据集中的每个图像，以使图像中每行像素的RGB通道总和为1（层）。
+缩放数据集中的每个图像，以便图像中所有像素的RGB通道总和为1（层）。
+从数据集中的每个图像中减去数据集的平均图像。（批量）
+根据给定的阈值将所有RGB值设置为0或1。（二值化）
+
+具体的前向/反向算法：只需在需要的时候求x_T, x_normalized_T, dout_T（即转置）
+其他跟batch_size一样即可。不得不说，矩阵真是方便啊！
+同样对比了四种选择
+No normalization: batch size =  5
+Normalization: batch size =  5
+Normalization: batch size =  10
+Normalization: batch size =  50
+结果跟batch相一致

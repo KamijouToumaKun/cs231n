@@ -1,0 +1,108 @@
+Affine function
+仿射函数：相对于线性函数的概念
+
+线性函数：设函数L R^m->R^n
+对任意向量X和Y，L(X+Y)=L(X)+L(Y)；
+对任意向量X，L(aX)=aL(X)
+
+设有线性函数L，向量b
+形如A(X)=L(X)+b的是仿射函数
+
+其实就是类似一次函数
+x.shape (N,D)
+w.shape (D,C)
+b.shape (C)
+out.shape (N,C)
+out = xw+b
+反向传播
+dx = dout W^T
+dw = dx^T dout
+根据shape就不会记混了
+db = dout
+
+对于一个单独的ReLU层
+out = max(0,x)
+反向传播
+dx = dout*{1: x>0; 0: x<=0}
+即dx = {dout: x>0; 0: x<=0}
+
+哪些函数的梯度可能会变成0？即饱和区域
+参看https://blog.csdn.net/edogawachia/article/details/80043673
+总结了各种常见的激励函数及其优缺点
+Sigmoid：1/(1+e^-x)在两端的时候会近似于0（软饱和区域）
+ReLU：max(0,x)，负数硬饱和，正数不饱和
+Leaky ReLU：max(0.01x, x)，0处饱和
+
+提供了一种写法，把层与层之间的前向和反向传播都模块化了，很方便
+
+注意，fc_net.py文件里面的参数初始化的时候，要写好shape
+self.params['W1'] = weight_scale * np.random.randn(input_dim, hidden_dim)
+self.params['b1'] = np.zeros((1, hidden_dim))
+self.params['W2'] = weight_scale * np.random.randn(hidden_dim, num_classes)
+self.params['b2'] = np.zeros((1, num_classes))
+不可以直接写np.zeros(num_classes)，这样会无法对齐
+
+solver训练得到准确率0.525
+
+然后用模块化的方法搭建多层网络。先是3层
+检验搭建的正确性：sanity check
+1、10类的softmax分类器，看初始的loss是不是约为-log1/10 = 2.3
+2、对一个小数据集（大小为50）进行训练
+看训练到最后能不能让它过拟合：train_acc = 1.0且loss = 0
+solver = Solver(model, small_data,
+                print_every=10, num_epochs=1000, batch_size=25,
+                update_rule='sgd',
+                optim_config={
+                  'learning_rate': learning_rate,
+                }
+         )
+weight_scale = 1e-2
+learning_rate = 1e-4
+这两个超参数我没有改；我把epoch从20改到了1000
+在700+轮的时候，acc已经达到了1.0；但是1000轮结束，loss还只是从2.31降到了0.12
+按理说应该再增加轮数的
+
+注意，在solver.py的_step函数中有一段，在批量归一化那一节里面这段代码同样出了问题
+# Perform a parameter update
+for p, w in self.model.params.items():
+    dw = grads[p]
+    config = self.optim_configs[p]
+	# print(w, config)
+    # print(w.shape, dw.shape)
+    w = w.reshape(dw.shape[0], -1) # 这一句是我加上的
+    next_w, next_config = self.update_rule(w, dw, config)
+    # print(next_w, next_config)
+    self.model.params[p] = next_w
+    self.optim_configs[p] = next_config
+w = w.reshape(dw.shape[0], -1)，加了这一句，才能让update_rule成功work
+否则，因为w和dw的shape不一定相同：比如w.shape是(100,)，dw.shape是(1,100)
+报错ValueError: non-broadcastable output operand with shape (100,) doesn't match the broadcast shape (1,100)
+
+再是5层，这下训练非常的缓慢了
+weight_scale = 1e-2
+learning_rate = 1e-4
+首先这两个超参数我没有改；同样把epoch从20改到了1000，loss只从2.31降到了2.25
+必须要调整上述两个超参数了
+先只尝试调整learning_rate，提升到1e-4，再到1e-3，都没有用
+然后调整weight_scale = 1e-1，骤然改观
+经过10轮，acc就已经到了1；epoch=100的时候，loss只有0.000018了
+
+最优化部分：
+1、先对比SGD和SGD+momentum（没有动量更新x的部分，只有更新w？而且公式还跟他讲的不一样？？？）
+从图中明显看得出，训练相同轮数，有动量的版本，loss下降更快；
+在训练集和验证集上，acc也更高
+2、再对比RMSProp和Adam
+RMSProp按照图来即可，只是图中是更新x，这里是更新w；
+而Adam还要做一点解说：
+	config['t'] += 1 # 这个参数表示训练轮数
+    beta1 = config['beta1'] # beta1是first_moment的衰减率，定值
+    beta2 = config['beta2'] # beta2是second_moment的衰减率，定值
+    config['m'] = beta1 * config['m'] + (1-beta1) * dw # first_moment
+    config['v'] = beta2 * config['v'] + (1-beta2) * dw**2 # second_moment
+    mb = config['m'] / (1 - beta1**config['t']) # 轮数越前，提升的幅度越大
+    vb = config['v'] / (1 - beta2**config['t'])
+    next_w = w - config['learning_rate'] * mb / (np.sqrt(vb)+config['epsilon'])
+3、总结
+对于之前定义的small_data做训练
+从图中明显看得出，训练相同轮数，无论是loss下降最快，还是训练集和测试集上的acc最高
+排序都是adam > RMSProp > SGD+momentum > SGD；
