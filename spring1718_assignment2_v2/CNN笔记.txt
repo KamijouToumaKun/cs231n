@@ -1,0 +1,129 @@
+先写出卷积层的naive操作
+#           in1         in2
+# out1  in1*out1    in2*out1    =>  ∑out1
+# out2  in1*out2    in2*out2    =>  ∑out2
+最外层对数据n循环
+	中间层对输出通道循环
+		内层对输入通道循环
+	结果累加在同一个输出通道上
+
+检验卷积结果：
+C_OUT, C_IN, F_H, F_W = w.shape # C_OUT组filter，C_IN个通道，filter = F_H*F_W
+w = np.zeros((2, 3, 3, 3))
+表示3个输入通道，2个输出通道，filter大小3*3
+# The first filter converts the image to grayscale.
+# Set up the red, green, and blue channels of the filter.
+w[0, 0, :, :] = [[0, 0, 0], [0, 0.3, 0], [0, 0, 0]]
+w[0, 1, :, :] = [[0, 0, 0], [0, 0.6, 0], [0, 0, 0]]
+w[0, 2, :, :] = [[0, 0, 0], [0, 0.1, 0], [0, 0, 0]]
+第一个输出通道内，针对RGB三个输入通道，filter分别是一圈0、中间0.3、0.6、0.1
+对应相乘再累加，将会得到R*0.3+G*0.6+B*0.1，这是将原图灰度化
+# Second filter detects horizontal edges in the blue channel.
+w[1, 2, :, :] = [[1, 2, 1], [0, 0, 0], [-1, -2, -1]]
+第二个输出通道内，针对RGB三个输入通道，filter分别是全0、全0、sobel算子
+对应相乘再累加，将会得到B通道的（水平）边缘
+
+然后是池化层。了解反向传播的公式
+注意，这里本来有两行的内容是
+x = np.random.randn(3, 2, 8, 8) #???
+dout = np.random.randn(3, 2, 4, 4) #???
+结果总是因为无法对齐而报错。我只好改成如下，就可以了
+x = np.random.randn(3, 2, 4, 4) #???
+dout = np.random.randn(3, 2, 2, 2) #???
+
+naive方法毕竟太慢，fast_layers.py里提供了conv_forward_fast方法
+Testing conv_forward_fast:
+Naive: 17.922196s
+Fast: 0.356575s
+Speedup: 50.262065x
+Difference:  2.7285883131760887e-11
+
+Testing conv_backward_fast:
+Naive: 10.512881s
+Fast: 0.018298s
+Speedup: 574.539969x
+dx difference:  1.949764775345631e-11
+dw difference:  4.560482637200867e-13
+db difference:  3.481354613192702e-14
+
+有很多的加速方法，比如把循环改成矩阵运算（内部使用C实现、还有数学优化）
+其他的方法，比如在做卷积前，先unfold（展开），然后就可以直接做矩阵乘法了。
+以及，在反向传播的时候，还可以用稀疏矩阵实现矩阵的存储和运算————后期大部分梯度都是0了
+这方面有很多的论文可以看
+
+后面又出现了同样的错误：
+x = np.random.randn(100, 3, 32, 32)
+dout = np.random.randn(100, 3, 16, 16)
+我又只能把它改成了：
+x = np.random.randn(100, 3, 4, 4)
+dout = np.random.randn(100, 3, 2, 2)
+
+Convolutional "sandwich" layers
+即 ((卷积 ReLU)+ 池化)+ FC 的组合模式
+比如，(卷积 ReLU 卷积 ReLU 池化)[3] FC；这里给的是：
+1、conv - relu - 2x2 max pool
+2、affine - relu
+3、affine - softmax
+
+同样用Overfit small data来试验网络搭建得对不对
+注意，在cnn.py中进行参数回传的时候，要将卷积层reshape
+结果：成功地过拟合了
+...
+(Epoch 14 / 15) train acc: 0.960000; val_acc: 0.212000
+(Iteration 29 / 30) loss: 0.158160
+(Iteration 30 / 30) loss: 0.118934
+(Epoch 15 / 15) train acc: 0.990000; val_acc: 0.220000
+
+正式进行训练（980轮），预计的训练集准确率acc高于40%
+不用GPU，真的是慢得可以
+(Iteration 1 / 980) loss: 2.304740
+(Epoch 0 / 1) train acc: 0.103000; val_acc: 0.107000
+...
+(Iteration 921 / 980) loss: 1.674166
+(Iteration 941 / 980) loss: 1.714316
+(Iteration 961 / 980) loss: 1.534668
+(Epoch 1 / 1) train acc: 0.504000; val_acc: 0.499000
+
+尝试加上BN层，检验正向和反向传播
+
+这里又提出来一个Group Normalization的概念：
+之前说过，对于CNN，Layer Normalization的效果不如Batch Normalization
+之前我对于Layer Normalization的理解，是这样的：
+Layer Normalization不是把输出归一化，而是把特征归一化
+不是数据之间求平均；而是对一个D维数据，将每一维之间求平均
+	N1	N2	N3
+D1				∑：Batch
+D2				∑
+D3				∑
+	∑ 	∑ 	∑
+	Layer
+对于普通数据的确如此。把x和out转置一下，两者的算法就完全一样了
+
+但是对于图像数据，它内部还要分层，= CHANNEL * (ROW*COL)
+为了跟普通类型的数据进行区别，可以改叫Spatial BatchNorm
+据查，BN，LN，IN，GN从学术化上解释差异：
+BatchNorm：batch方向做归一化，算N*H*W的均值：C之间独立
+LayerNorm：channel方向做归一化，算C*H*W的均值：N之间独立
+	普通的数据 = N * CHANNEL * 1，每一维都是一个channel，ROW*COL=1
+	于是Batch 和 Layer 互为转置
+InstanceNorm：一个channel内做归一化，算H*W的均值：（N，C）之间独立
+	*假如认为所有维都是一个channel，channel = 1
+	*那么Layer = Instance
+	*把一幅图像的各个点归一化？似乎没道理啊……
+GroupNorm：将channel合并成group，然后每个group内做归一化，算(C/G)*H*W的均值
+	（N，G）之间独立
+	既不至于像Layer一样独立的元数过少：特征消失
+	也不至于像Instance一样让每个C完全独立，没有道理
+	G的大小也是一个超参数
+
+BatchNorm forward
+先把顺序调换成（N，W，H，C），再reshape
+再调用普通数据的Batch Normalization函数就可以了！最后把顺序调换回来
+GroupNorm forward也是如此
+但是，给定的数据里，gamma.shape is (1,C,1,1), so x.shape should be (?,C,?,?)
+这让我觉得很没道理；不应该是(N*G,)吗？？？
+最后就这样遗留了一个问题下来。
+
+注意，两处的空的花括号要补全
+bn_param = {'mode': 'train'}
+gn_param = {'mode': 'train'}
