@@ -1,0 +1,146 @@
+加载数据：
+cifar10 = tf.keras.datasets.cifar10.load_data()
+这里遇到了奇怪的问题：上面这个函数在调用时总是报错
+报错原因是[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed
+初步判断是Toronto的下载镜像被墙了；但是，直接点击下载又是可以的
+总之，尝试按照网上说的，提前下载好数据，解压后放到~/.keras/datasets里
+仍然失败；直接把压缩包放到上述目录里，仍然失败，气
+最后，我尝试用Python2的TensorFlow运行一遍，竟然下载成功了
+然后再用Python3运行，也能够读取到以上内容了！真是玄学啊……
+
+之前把直方图归一化：减去平均值再除以标准差，作为特征
+之前只是看过整个X_train的平均图像：axis=0
+这里的平均的对象是axis = 0&1&2？？？
+mean_pixel = X_train.mean(axis=(0, 1, 2), keepdims=True)
+std_pixel = X_train.std(axis=(0, 1, 2), keepdims=True)
+X_train = (X_train - mean_pixel) / std_pixel
+X_val = (X_val - mean_pixel) / std_pixel
+X_test = (X_test - mean_pixel) / std_pixel
+test的归一化也用X_train来作差
+
+定义了一个def flatten(x):
+reshape：x.shape本来是(size, 32, 32, 3)
+现在N = tf.shape(x)[0]
+return tf.reshape(x, (N, -1))
+tf自己也有reshape函数，可以把整张图拉直
+
+测试搭建一个三层的网络
+CONV RELU CONV RELU FC
+如果padding = 'VALID'
+new_height = new_width = (W – F + 1) / S （结果向上取整）
+如果padding = 'SAME'
+new_height = new_width = W / S （结果向上取整）
+
+x_np = np.zeros((64, 32, 32, 3))：N，H，W，3CHANNELS
+因为最后fc需要的大小仍是32*32，可见strides都是[1,1,1,1]且padding='SAME'
+可是，又规定zero-padding of 2和zero-padding of 1？？？
+conv_w1 = tf.zeros((5, 5, 3, 6))：KH1，KW1，3CHANNELS，组数=6
+conv_b1 = tf.zeros((6,))
+输出维持大小不变：32*32*6
+conv_w2 = tf.zeros((3, 3, 6, 9))：KH2，KW2，6CHANNELS，组数=9
+conv_b2 = tf.zeros((9,))
+输出维持大小不变：32，32，9；需要reshape一下；或者直接用flatten
+fc_w = tf.zeros((32 * 32 * 9, 10))
+fc_b = tf.zeros((10,))
+注意，tensor获取shape要用.get_shape().as_list()
+不是.shape，同时要用as_list转一下，否则得到的是Dimension类型而不是int
+
+又尝试定义了一个两层全连接网络，处理CIFAR-10
+loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=scores)
+*这里的初始化方法采用的是He Kaiming在ICCV 2015论文中提出的方法
+预期acc达到40%：
+Iteration 0, loss = 2.9525
+Got 137 / 1000 correct (13.70%)
+Iteration 100, loss = 1.8700
+Got 379 / 1000 correct (37.90%)
+……
+Iteration 700, loss = 1.9521
+Got 439 / 1000 correct (43.90%)
+
+又重新定义了一个三层的网络，要求写出初始化部分
+现在又需要重新修改上面的第一个strides为[1,2,2,1]了
+输出x, conv_w1, conv_w2, conv_b.get_shape()以做检查
+(?, 32, 32, 3)
+(?, 16, 16, 32)
+(?, 16, 16, 16)
+(?, ?)
+x的shape的第一维是？，即问号
+表示不定的意思。batch size是会变的
+
+出现了问题：loss迅速下降，可是acc却几乎不变，甚至反而降低？？？
+Iteration 0, loss = 5911.7959
+Got 112 / 1000 correct (11.20%)
+Iteration 100, loss = 12.7211
+Got 100 / 1000 correct (10.00%)
+……
+Iteration 700, loss = 3.4352
+Got 97 / 1000 correct (9.70%)
+
+keras：更加地函数式
+方法1：TwoLayerFC
+用tf.layers.xx（首字母大写）创建一些层
+每个层都实现了call接口，可以像函数一样调用，串在一起
+方法2：two_layer_fc_functional
+用tf.layers.xx（首字母小写），参数是上一层创建的层
+这样直接连接起来
+效果：是一样的
+
+试验两层的全连接网络
+Starting epoch 0
+Iteration 0, loss = 3.1998
+Got 100 / 1000 correct (10.00%)
+Iteration 100, loss = 1.9269
+Got 397 / 1000 correct (39.70%)
+……
+Iteration 700, loss = 1.9592
+Got 435 / 1000 correct (43.50%)
+
+然后，直接使用Sequential API
+三层卷积的效果
+Starting epoch 0
+Iteration 0, loss = 2.7216
+Got 104 / 1000 correct (10.40%)
+Iteration 100, loss = 1.6921
+Got 411 / 1000 correct (41.10%)
+……
+Iteration 700, loss = 1.4402
+Got 512 / 1000 correct (51.20%)
+
+官方提供的两层全连接的效果
+Starting epoch 0
+Iteration 0, loss = 3.2839
+Got 131 / 1000 correct (13.10%)
+Iteration 100, loss = 1.8721
+Got 385 / 1000 correct (38.50%)
+……
+Iteration 700, loss = 1.8935
+Got 455 / 1000 correct (45.50%)
+
+三层卷积在CIFAR-10上的效果
+Starting epoch 0
+Iteration 0, loss = 2.5885
+Got 77 / 1000 correct (7.70%)
+Iteration 100, loss = 2.4139
+Got 143 / 1000 correct (14.30%)
+……
+Iteration 700, loss = 1.9940
+Got 301 / 1000 correct (30.10%)
+看来CIFAR-10的确不好训练啊
+
+不过我这里还没有加Nesterov momentum 0.9
+加了以后，准确率更高了，如同所说的一样达到45%
+注意，这里需要的不是tf.keras.optimizers.SGD(lr=learning_rate, decay=1e-6, momentum=0.9, nesterov=True) 
+而是tf.train.MomentumOptimizer(learning_rate, momentum=0.9, use_locking=False, use_nesterov=True)，毕竟只有tf.train中的Optimizer才提供minimize方法
+Starting epoch 0
+Iteration 0, loss = 3.4112
+Got 112 / 1000 correct (11.20%)
+Iteration 100, loss = 2.0543
+Got 298 / 1000 correct (29.80%)
+……
+Iteration 700, loss = 1.5903
+Got 447 / 1000 correct (44.70%)
+我这里每次到了Iteration 700就停了，也不知道为什么
+
+最后的开放式训练略，因为可以尝试的API太多了
+包括ReLU可以换成MaxOut、可以使用DropOut等
+以后再说吧
