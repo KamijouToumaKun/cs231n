@@ -1,0 +1,84 @@
+竟然还介绍了CPU和GPU的区别……
+CPU是小小的芯片，GPU（图形卡）是大号的，拥有自己的冷却系统等更多更复杂的东西
+NVIDIA vs AMD，深度学习基本选择N卡：他们更致力于深度学习的解决方案
+
+CPU至多4核、8核，能调度的超线程（Hyper-Threading）为10～20个
+这是指真正能同时并行的线程有10～20个，每个线程做不同的事情
+同样价位的GPU有1920、3840核，当然单个核的速度和能做的事情都不如CPU
+GPU是多个核合作一项事情：并行所做的不是不同、而是相同的事情
+最适合GPU做的：矩阵乘法
+（当然具体要涉及到矩阵的分割、通信，这是并行和分布式计算的内容了）
+
+CPU的内存可能是2G、4G
+GPU有自己的RAM，内存更大（12G），但是不能直接通信：GPU也有多层缓存
+先从硬盘读大量数据进内存，然后在GPU中计算、存储权重
+最后一起写回硬盘。最好是I/O和计算并行，不然效率有很大的瓶颈
+
+*GPU编程：不要求
+CUDA：NVIDIA自己提供优化的深度学习库（我只学过简单的OpenCV等）
+OpenCL：平台通用，但是优化程度不高
+优化过的效率大概是没有优化过的3倍
+
+据测，VGG16/19、ResNet上CPU的耗时是GPU的60～70倍
+
+——————————————————————————————————————————
+
+深度学习框架
+Caffe（UC Berkeley）->Caffe2（兼并入了PyTorch）
+Torch（NYU、Facebook）->PyTorch（Facebook）
+Theano（Montreal：蒙特利尔）->Tensorflow（Google）
+Tensorflow用一年多的时间已经成为了最受欢迎的框架
+从学术界到工业界
+
+——————————————————————————————————————————
+
+计算图的概念
+使用计算图，方便管理；
+梯度不用再建一套变量且自己算；
+帮你做好了GPU和优化（Numpy不支持GPU）
+
+定义数据x和y使用tf.placeholder，在会话中实际读数据可以使用np（CPU）；
+1）如果权重也是CPU上定义的tf.placeholder
+则每次需要拷贝（如果是用GPU）过去，计算得到梯度；
+把每次获得的梯度拷贝回来（如果是用GPU），减在np（CPU）的数组上；
+这样如果是在CPU和GPU之间，来回拷贝就会造成很大的通信瓶颈
+
+2）最好用tf.Variable：权重直接在GPU上定义
+也用tf自己的tf.random_normal来对其随机初始化
+在计算图中用tf的库函数搭建好网络结果，最后计算出结果
+loss = tf.reduce_mean(...)
+或者直接写成loss = tf.losses.mean_squared_error(y_pred, y)
+
+更新梯度也改成直接写在计算图中：new_w = w.assign(w - l_r * grad_w)
+然后把所有的w打包：updates = tf.group(new_w1, new_w2, ...)
+或者直接定义优化器：optimizer = tf.train.GradientDescentOptimizer(1e-5)
+updates = optimizer.minimize(loss)
+
+在会话中：with ... as:
+	先sess.run(tf.global_variables_initializer())
+	# 实际执行各个权重的tf.random_normal来对其随机初始化
+	然后在会话的每一轮中
+		sess.run(loss, new_w, feed_dict=values)
+		# 其实，只需要loss的更新，和updates的更新
+		# updates的返回是None，需要它只为了tf不要偷懒，要具体计算它
+
+3）x和y还是写成placeholder，它表示一个占位符，其实不是放在计算图里面
+的确不要放在计算图里面，因为那样就写死了
+而x和y是不断变化的数据，每次都是不同的batch
+
+搭建网络还是很繁琐的
+比如批量归一化、CNN
+所以也有一行搭建网络的函数：tf.layers.xxx（见图）
+还有tf.contrib.learn等
+
+可视化工具：TensorBoard
+分布化运算：还不是很成熟
+
+Keras & TFLearn：第三方库搭建在Tensorflow的基础上
+
+——————————————————————————————————————————
+
+PyTorch更接近普通的python代码
+也可以不用计算图（张量式）；在一开始声明运行在gpu上
+
+用计算图的话，也是用Variable函数来声明

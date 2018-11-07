@@ -1,0 +1,15 @@
+成功的网络实例
+1998 LeNet-5 做一些小事情，比如MNIST数字识别
+	CONV MAXPOOL CONV MAXPOOL CONV FC
+2012：AlexNet 在ImageNet 1000分类比赛中大获成功 掀起了深度学习的大潮
+	CONV MAXPOOL BN 
+		对于227*227*3的图片 使用96组11*11的filter
+		（96个bias可以忽略不计）stride=4
+	CONV MAXPOOL BN
+	CONV CONV CONV MAXPOOL
+	FC FC FC
+	见图，据研究这里的BN不太有效果，不再使用了
+	但是可以对数据做变换来进行扩充
+	*因为参数过多，当初一个GPU的RAM只有3GB，需要2个GPU一个装一半的参数
+2013：ZFNet，是调过参的AlexNet
+2014：GoogleNet等，网络明显变深：19层和22层
