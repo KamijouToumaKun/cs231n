@@ -1,0 +1,11 @@
+使用dropout的变体形式
+1、train时：
+mask = (np.random.rand(*x.shape) < p) / p    
+out = x * mask
+2、test时
+直接输出out = x
+3、反向传播：dx = dout * mask
+
+尝试dropout的p为1，既没有任何dropout
+结果图显示，没有dropout的模型对训练集拟合得更好
+但是对于测试集，却往往是有dropout的模型的acc更高
