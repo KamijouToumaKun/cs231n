@@ -74,7 +74,7 @@ updates = optimizer.minimize(loss)
 可视化工具：TensorBoard
 分布化运算：还不是很成熟
 
-Keras & TFLearn：第三方库搭建在Tensorflow的基础上
+Keras & TFLearn：第三方库，搭建在Tensorflow的基础上
 
 ——————————————————————————————————————————
 
@@ -82,3 +82,5 @@ PyTorch更接近普通的python代码
 也可以不用计算图（张量式）；在一开始声明运行在gpu上
 
 用计算图的话，也是用Variable函数来声明
+
+暂时不深究了吧，我连TensorFlow都没学精呢
