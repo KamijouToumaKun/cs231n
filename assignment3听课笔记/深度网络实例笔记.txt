@@ -1,0 +1,108 @@
+成功的网络实例
+卷积神经网络中十大拍案叫绝的操作：https://www.zhihu.com/appview/p/28749411
+
+1998 LeNet-5 做一些小事情，比如MNIST数字识别
+	*CONV层包含激活函数
+	CONV+MAXPOOL
+	CONV+MAXPOOL
+	FC
+	FC
+	SOFTMAX
+
+ImageNet大规模视觉识别挑战赛（ILSVRC）
+2012：AlexNet 在分类比赛中大获成功 掀起了深度学习的大潮
+	CONV+MAXPOOL+BN 
+		*第一次采用ReLU作为激活层
+		*FC层可以使用Dropout，下同
+		*对于227*227*3的图片 使用96组11*11的filter
+		（96个bias可以忽略不计）stride=4
+	CONV+MAXPOOL+BN
+	CONV
+	CONV
+	CONV+MAXPOOL
+	FC
+	FC
+	SOFTMAX
+	可以对数据做变换：对称、旋转……来进行数据扩充
+	*因为参数过多，当初一个GPU的RAM只有3GB，需要2个GPU一个装一半的参数
+	*这叫做group normalization
+
+tf.image.per_image_standardization() 对图像进行标准化
+好像本来是用了另一种标准化，但是据研究不太有效果，不再使用了
+而BN应该还是必要的吧？BN 某种意义上还起到了正则化的作用。
+
+2013：ZFNet，是调过参的AlexNet
+
+2014：分类（classification）比赛和定位（localization）比赛
+	定位（localization）是除了要辨识目标，还要用框给框出来
+	侦测（detection）比赛时，目标个数还是不确定的
+
+VGGNet（16/19层），是一个变深了的AlexNet（见图）
+为什么VGG19我数出来只有18层……
+
+网络明显变深：层数变多，主要需要非线性层变多
+为什么要用比较小的filter？
+猜想：卷积之后，虽然padding可以使图像大小不变，但是还是会丢失信息
+小的filter使得信息丢失得不多，于是网络可以更深？
+但是，层数深了以后，随着降采样，信息还是丢失了。而且，降采样是必要的
+一直靠padding来维持图像大小没有意义，只会白占空间。假设步长为1
+3层3*3的filter ABCDEFG... -> XBCDEFG... -> XXCDEFG... -> XXXDEFG...
+而1层7*7的filter，ABCDEFG... -> XXXDEFG，看起来效果是一样的
+但是，比较参数的个数：3层3*3的filter，输入通道c_in，输出通道c_out
+（有时候也管输入通道数量叫图像的深度）
+参数有3 * 3*3*c_in*c_out个（假如c_in=c_out，则每一层都是C进C出）
+而1层7*7的filter，参数是7*7*c_in*c_out个。还是3层3*3的filter的参数更少
+
+就算精打细算，网络深了以后，参数数量还是爆炸
+需要足够的空间来存储所有的中间结果和参数
+为什么呢？倒不是要搞流水线作业，而是要cache起来给反向用啊！
+前向传播存储中间图像需要约96M，假设内存为5G，最多只能放50张图片（图片本身大小忽略不计）
+有上亿个参数，存储参数需要约138M空间
+
+GoogLeNet（19层和22层，内嵌了LeNet的名字）
+主要追求计算的有效化
+做分类竟然只用CONV提取特征，在网络中没有全连接层！于是只有500万个参数！
+使用inception模块：网络不仅有深度，也有宽度
+同时使用1*1、3*3、5*5的filter和3*3的pool（其步长也是1）
+padding维持生成的图像大小，然后叠在一起输出（tf.concat）
+
+目的：多个不同 size 的卷积核能够增强网络的适应力
+但是，这样一来，参数数量会更庞大
+所以需要1*1的filter，称为bottleneck layer，会把它加在3*3的filter处理之前（见图）
+主要还是把输入c_in=256变成输出的c_out=128
+通过减少层数，避免计算量过大。应该不会丢失很多信息
+另外，降采样减少参数个数，避免参数过多
+
+辅助（auxiliary）分类器：在网络的两处中间点就进行输出（多输出）
+因为中间节点的分类效果也比较好，所以用于辅助分类
+这两层有着全连接和SOFTMAX等结构
+可以按一个较小的权重加到最终的分类结果中。相当于做了模型融合
+就算不融合，也有反向传播。较浅处的反向传播的梯度不会消灭得太快
+
+Inception也有改进：v1-v4
+
+2015：大名鼎鼎的ResNet：残差网络
+此时，acc已经优于人类
+
+在以往，更深的网络不一定更好，test error可能更大，这是可以理解的
+退化（Degradation）问题：train error也比浅层网络更大！（见图）
+这是很难以理解的。毕竟网络更深、参数更多，可以更自由地去拟合，乃至过拟合
+“一个极端情况是这些增加的层什么也不学习，仅仅复制浅层网络的特征，
+即这样新层是恒等映射（Identity mapping）。
+在这种情况下，深层网络应该至少和浅层网络性能一样，也不应该出现退化现象。”
+
+对于输入x，要拟合一个h(x)
+经过两个CONV层以后，对于得到的结果f(x)，再加上x本身（短路连接）进行输出
+x本身的传递跳过了两个CONV，所以叫短路(shortcut/skip connection）
+当然，为了能相加，两个CONV保持channel数不变；短路以后，再进行下采样和channel数的变化
+反向传播让f(x)+x趋近于h(x)
+于是，两个CONV学到的f(x)其实是h(x)-x：残差
+它更接近于0，所以也有归一化的效果
+当残差为0时，此时CONV层学不到东西，保持恒等映射，至少网络性能不会下降
+于是网络的深度可以大大增加，没有问题。ResNet有152层；据算可以达到1000层
+
+课时23中提到的其他的改进：
+Network in Network https://www.jianshu.com/p/8a3f9f06bbe3
+改进后的ResNet；Wide ResNet；ResNeXt；Stochastic……
+非ResNet的：分形网络FractalNet，DenseNet……
+追求网络大小的压缩：SqueezeNet，只有0.5M
