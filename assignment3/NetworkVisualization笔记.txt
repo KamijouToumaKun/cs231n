@@ -1,0 +1,48 @@
+还是只做TensorFlow的部分，PyTorch的就不做了。
+
+课时23提到过的，ResNet的改进之一：SqueezeNet
+追求网络大小的压缩，只有0.5M
+已经定义好了模型squeezenet.py，然后运行脚本get_squeezenet_tf.sh
+其中用到了wget命令下载训练好的数据，但是我的mac上本来竟然不能用这个命令
+所以先brew install wget，然后又告诉我brew本身需要更新……
+算了，直接从URL下载、解压好了
+同样，get_imagenet_val.sh脚本也跳过，直接从URL下载好ImageNet ILSVRC 2012 Classification dataset
+竟然只有3.9M，就算是二进制流保存也不该这么小吧？后来想明白了，人家每张图片都很小嘛。
+
+现在要对这个Pretrained的model进行再训练
+
+回忆：Occursion Experiment（排除实验）
+尝试用滑动窗口遮掉图像的一部分（将其改成全图的平均值）
+看哪一部分/哪些像素最能干扰网络的判断，这可以画成一张热力图（见图）
+最能干扰判断 = 正确分类的概率下降最多/正确分类的得分下降最多（saliency maps）
+这已经接近于对抗网络这种概念
+
+对图片先做一个preprocess_image：/255，然后-means，/std
+这是对于每个通道都做了一个批量归一化，这是BN。回忆CNN笔记中：
+BN，LN，IN，GN从学术化上解释差异：
+BatchNorm：batch方向做归一化，算N*H*W的均值：C之间独立
+LayerNorm：channel方向做归一化，算C*H*W的均值：N之间独立
+特别的，这里还先做了一个/255，保证先把数据范围归一到[0,1]
+其实，-mean，/std本身就几乎能让数据变到[-1,1]
+但是如果数据很特殊：方差特别大，比如100,-100,3,4（我随手写的例子）
+那么100就会被归一化到1.2，-100会被归一化到-1.25，略微超了标
+
+saliency_tensor = tf.gradients(correct_scores, model.image)
+可以直接在计算图中获得correct_scores对于image的梯度：从224*224个像素到5个class
+saliency = sess.run(saliency_tensor, feed_dict={model.image: X, model.labels: y})
+它是一个list，但是len=1。要取saliency = saliency[0]
+得到array size(5, 224, 224, 3)
+然后saliency = np.max(np.array(saliency), axis=3)
+只取最后一维上的max（而不是sum？？？），返回array size(5, 224, 224)并显示为热力图
+这里mask.size=5：使用的只有5张图像，一类一张，用这5张来看热力图
+
+然后是对抗网络：fooling images
+同样，架好correct_scores和grad_tensor
+之后进行循环，直到进行误分类为止
+这里可以不选择idx=0，换一张图片也是可以误分类的
+
+然后是类别可视化
+可视化的类别是turantula（狼蛛）
+因为噪声图是随机的
+第一次从初始噪声图形成的图片大概是四只蜘蛛的轮廓，分居四个角，挺瘆人的
+第二次就只有三只了，左上、右上、下方
