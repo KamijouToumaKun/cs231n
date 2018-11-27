@@ -1,0 +1,65 @@
+风格迁移
+从一张噪声图开始，生成与目标图像具有相同gram矩阵的图像。
+主要就是要计算Gram矩阵，它可以度量纹理的相似度
+这里计算的损失是生成图像与目标图像各层gram矩阵的加权L2距离。
+参见 http://www.cnblogs.com/coldyan/p/8403506.html
+
+另外要加一个正则项：Total-variation regularization
+为了让图像显得比较平滑
+tv_loss定义为图像中所有相邻像素对的差值的平方和
+计算tv_loss的方法是，将图像向上下左右四个方向平移一个像素，分别与原图像作差求平方，再除以2
+
+拟合不同的话，需要不同的超参数，这个怎么调整呢？？？
+params1 = {
+    'content_image' : 'styles/tubingen.jpg',
+    'style_image' : 'styles/composition_vii.jpg',
+    'image_size' : 192,
+    'style_size' : 512,
+    'content_layer' : 3,
+    'content_weight' : 5e-2, 
+    'style_layers' : (1, 4, 6, 7),
+    'style_weights' : (20000, 500, 12, 1),
+    'tv_weight' : 5e-2
+}
+拟合《呐喊》（Scream）
+params2 = {
+    'content_image':'styles/tubingen.jpg',
+    'style_image':'styles/the_scream.jpg',
+    'image_size':192,
+    'style_size':224,
+    'content_layer':3,
+    'content_weight':3e-2,
+    'style_layers':[1, 4, 6, 7],
+    'style_weights':[200000, 800, 12, 1],
+    'tv_weight':2e-2
+}
+拟合《星月夜》（Starry Night）
+params3 = {
+    'content_image' : 'styles/tubingen.jpg',
+    'style_image' : 'styles/starry_night.jpg',
+    'image_size' : 192,
+    'style_size' : 192,
+    'content_layer' : 3,
+    'content_weight' : 6e-2,
+    'style_layers' : [1, 4, 6, 7],
+    'style_weights' : [300000, 1000, 15, 3],
+    'tv_weight' : 2e-2
+}
+第一个效果最好，后两个做出来的效果稍次
+
+特征反演
+还可以反过来，让《星月夜》（Starry Night）达到原图的风格
+将参数中content loss的权值设为0，就等于做纹理生成。
+同理，将参数中styleloss的权值设为0，等于做特征反演。
+params_inv = {
+    'content_image' : 'styles/tubingen.jpg',
+    'style_image' : 'styles/starry_night.jpg',
+    'image_size' : 192,
+    'style_size' : 192,
+    'content_layer' : 3,
+    'content_weight' : 6e-2,
+    'style_layers' : [1, 4, 6, 7],
+    'style_weights' : [0, 0, 0, 0], # we discard any contributions from style to the loss
+    'tv_weight' : 2e-2,
+    'init_random': True # we want to initialize our image to be random
+}
