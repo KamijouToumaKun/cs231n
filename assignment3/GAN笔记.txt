@@ -1,0 +1,57 @@
+一开始又遇上了网络连接不了、mnist下载不下来的问题
+还是得先用python2的tensorflow运行load_data()函数，下载下来
+
+看作业里面，generator并没有用到什么概率公式，也没有使用CNN结构（后面会用到的）
+就是一个三层的全连接网络，激活函数分别是ReLU、ReLU、tanH（最后保证变换到-1～1）
+generator 想最小化假的得分（但同时不追求真分类的得分最大化？？？）
+discriminator 也是全连接的，用到了leaky ReLU；想加强分类能力
+
+使用tf.nn.sigmoid_cross_entropy_with_logits，sigmoid的交叉熵
+交叉熵作为loss有很多应用场景，最大的好处是可以避免梯度消散
+loss的计算：
+logits_real保存每一张图片是真的得分, logits_fake保存每一张图片是假的得分
+用sigmoid转换为可能性（而并不由softmax来做归一化）
+1、generator loss = -tf.reduce_mean(tf.log(normal_fake_pro))
+2、discriminator loss = -tf.reduce_mean(tf.log(normal_real_pro)) - tf.reduce_mean(tf.log(1 - normal_fake_pro)) 
+
+另外，梯度下降使用了AdamOptimizer，反正tensorflow方便，不用白不用
+希望看到G_loss 逐渐变得足够小，而D_loss 逐渐变大
+Epoch: 0, D: 1.336, G:0.8016
+Epoch: 1, D: 1.132, G:1.172
+...
+Epoch: 9, D: 1.239, G:0.7269
+Final images
+而看别人的效果：Iter: 4200, D: 1.336, G:0.7591 
+说明这就是极限了
+生成效果并不大真实，我想是因为分类器没有使用CNN结构
+
+换一套损失函数：Least Squares GAN
+奇怪的是，均方误差反而比交叉熵模型更新？
+1、generator loss = scores_fake与1之间的均方误差
+2、discriminator loss = [scores_real, scores_fake]与[1, 0]之间的均方误差
+
+Epoch: 0, D: 0.6009, G:0.5689
+Epoch: 1, D: 0.1483, G:0.2733
+...
+Epoch: 8, D: 0.2279, G:0.1777
+Epoch: 9, D: 0.2163, G:0.2102
+Final images
+而看别人的效果：Iter: 4250, D: 0.2131, G:0.1725 
+说明这就是极限了
+生成效果还是不大真实，绝对是因为没有使用CNN结构
+
+终于给分类器加上了CNN结构：Deep Convolutional GANs
+当然，也就慢的多了
+Epoch: 0, D: 0.9508, G:1.246
+...
+看gan_outputs_tf.png的效果图，果然好多了！
+
+Inline Question指出，交替最小化同一目标（minimax函数），可能是一个棘手的问题
+虽然我无法回答给出正解，但我有一些自己的想法
+按说，交替进行梯度下降，是一个只看当前的贪心策略
+而棋类游戏的最大最小博弈，要向前看很多步，形成一棵搜索树，才能更接近全局的最优解
+也就是说，每一步尝试加不同的正则项/动量等，然后进行梯度下降
+这相当于每一步要尝试不同的选择，也要去尝试那些非贪心的选择
+但是，棋类本身，每一个动作和状态的转换都是很明晰的，尚且承受不住这样的搜索
+更何况我这样，每尝试一个新动作都是做一次新的梯度下降。这样做的时间和空间复杂度绝对爆炸。
+就算改用强化学习也撑不住啊。
