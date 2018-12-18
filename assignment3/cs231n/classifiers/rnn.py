@@ -140,7 +140,35 @@ class CaptioningRNN(object):
         # Note also that you are allowed to make use of functions from layers.py   #
         # in your implementation, if needed.                                       #
         ############################################################################
-        pass
+        #forward pass
+        h0, cache_h0 = affine_forward(features, W_proj, b_proj)
+        x, cache_wordvec = word_embedding_forward(captions_in, W_embed)
+        h, cache = None, None
+        if self.cell_type == 'rnn':
+            h, cache = rnn_forward(x, h0, Wx, Wh, b)
+        elif self.cell_type == 'lstm':
+            h, cache = lstm_forward(x, h0, Wx, Wh, b)
+        else:
+            pass
+        scores, cache_score = temporal_affine_forward(h, W_vocab, b_vocab)
+        loss, dscores = temporal_softmax_loss(scores, captions_out, mask, verbose=False)
+        
+        #backward pass
+        dh, dW_vocab, db_vocab = temporal_affine_backward(dscores, cache_score)
+        if self.cell_type == 'rnn':
+            dx, dh0, dWx, dWh, db = rnn_backward(dh, cache)
+        elif self.cell_type == 'lstm':
+            dx, dh0, dWx, dWh, db = lstm_backward(dh, cache)
+        else:
+            pass
+        dW_embed = word_embedding_backward(dx, cache_wordvec)
+        dfeatures, dW_proj, db_proj = affine_backward(dh0, cache_h0)
+
+        #
+        grads['W_proj'], grads['b_proj'] = dW_proj, db_proj
+        grads['W_embed'] = dW_embed
+        grads['Wx'], grads['Wh'], grads['b'] = dWx, dWh, db
+        grads['W_vocab'], grads['b_vocab'] = dW_vocab, db_vocab
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -205,7 +233,23 @@ class CaptioningRNN(object):
         # NOTE: we are still working over minibatches in this function. Also if   #
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
-        pass
+        D = W_embed.shape[1]
+        h0 = features.dot(W_proj) + b_proj
+        prev_h = h0
+        prev_c = np.zeros(h0.shape)
+        x = W_embed[self._start, :].reshape(1, -1).repeat(N, axis=0)
+        for i in range(0, max_length):
+            if self.cell_type == 'rnn':
+                next_h, _ = rnn_step_forward(x, prev_h, Wx, Wh, b)
+            elif self.cell_type == 'lstm':
+                next_h, prev_c, _ = lstm_step_forward(x, prev_h, prev_c, Wx, Wh, b)
+            scores = next_h.dot(W_vocab) + b_vocab
+            next_word = np.argmax(scores, axis=1)
+            captions[:, i] = next_word
+            x = np.zeros((N, D))
+            for p in range(0, N):
+                x[p, :] = W_embed[next_word[p], :]
+            prev_h = next_h
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
