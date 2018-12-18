@@ -1,0 +1,110 @@
+先运行get_coco_captioning.sh脚本，用wget下载数据集
+load_data处才能找到数据
+
+普通的全连接网络，前向传播是这样的：
+x(m) w(m,n) y(n)
+y = w.x+b（再激活）
+普通的全连接网络，反向传播是这样的：
+dloss = (y - real) ** 2
+dx = dloss.w^T (as dloss, traceback)
+dw = x.T.dloss
+
+RNN只是除了x，还多了一个h而已
+x(N,T,D)，目前把(N,T)看成同一维。wx(D,H)，两者相乘是没有问题的。
+RNN的前向传播rnn_step_forward
+next_h = np.tanh(prev_h.dot(Wh) + x.dot(Wx) + b)
+cache = (x, prev_h, Wx, Wh, b, next_h)
+RNN的反向传播rnn_step_backward
+dloss = (1 - next_h ** 2) * dnext_h
+dx = dloss.dot(Wx.T) 
+dprev_h = dloss.dot(Wh.T)
+dWx = x.T.dot(dloss)
+dWh = prev_h.T.dot(dloss)
+db = np.sum(dloss, axis=0)
+
+普通的网络的一层就这么结束了。
+然后是x(N,D1)->x(D2)->x(D3)->x(D4)...y(M) 层与层之间传递
+而RNN一共要循环T次，才能更新完一层
+y(M) ->  y(M) ->  y(M) ->  y(M)
+.        .        .        .
+.        .        .        .
+.        .        .        . 2、层与层之间传递
+x(D2)  ->x(D2)  ->x(D2)  ->x(D2)...
+^        ^        ^        ^
+|        |        |        |
+x(N,D1)->x(N,D1)->x(N,D1)->x(N,D1)... 1、时序方向，一行整体为一层
+
+
+
+word_embedding技术：嵌入是从数学上借来的概念，把词语映射到R^n上
+相似的单词就会被投影到相似的角度；
+还可以达到king - man + woman = queen，平行四边形法则的效果
+
+以前讲的是通过DNN模型训练词获得词向量
+并没有用到RNN，中间层是全连接的就行了
+x(N,D1)->x(D2)->x(D3)->x(D4)...y(M)->...->x(D2)->x(D1)
+
+本来我想，倒是也可以用上RNN：
+输入N个句子，每个句子长度上限为T，是一些有序的单词
+每个单词表示成一个独特的数字（一般还是one-hot向量，D1不是1维而是多维）组成第一层的时序序列
+encoder、decoder经过训练，最后，encoder拥有这样的能力：
+输入一个句子，作为第一层
+输出一个句子，原句中的每个单词都从D1维变成了M维0～1的向量
+然而，为什么一定要把整个句子一起翻译呢？
+难道在不同的句子里，单词的翻译还不同了？PASS
+
+
+
+真正的word_embedding：
+设x(N,T)是输入矩阵。又设一共有V个单词，则x的每个元素都属于0～V-1
+例如，词袋表：A=0,B=1,C=2,D=3
+那么，假如x为[[0, 3, 1, 2], [2, 1, 0, 3]]，则表示[ADBC, CBAD]
+设w(V,D)，表示一共有V个单词，每一个单词用D维来表示
+前向传播：
+for n in range(0, N):    
+    for t in range(0, T):        
+    	out[n, t, :] = W[x[n, t]]
+则out = [[W0,W3,W1,W2], [W2,W1,W0,W3]]
+反向传播：
+for n in range(0, N):
+    for t in range(0, T):
+    	dW[x[n, t], :] += dout[n, t, :]
+dout = [[dW0_,dW3_,dW1_,dW2_], [dW2_,dW1_,dW0_,dW3_]]
+out中每个Wi都可能出现多次，但是相应位置的dWi可能是不同的
+各个dWi_加起来作为总共的dWi，更新到对应的Wi上
+
+不过dout本身是如何确定的呢？？？
+
+
+
+LSTM部分
+遗忘门之类的东西好复杂啊？？？而且似乎很玄学。
+
+Inline Question：
+Recall that in an LSTM the input gate $i$, forget gate $f$, and output gate $o$ are all outputs of a sigmoid function. Why don't we use the ReLU activation function instead of sigmoid to compute these values? Explain.
+
+LSTM一般用tanh和sigmoid而不用ReLU，因为可能会出现梯度爆炸的现象。
+梯度消失（vanishing gradient）和梯度爆炸（exploding gradient）
+以往我们担心的是梯度消失，现在要担心的恰好相反。
+LSTM就是要让远处的信息被遗忘掉，而不是一直保持下来。
+遗忘门之类的东西好复杂啊？？？而且似乎很玄学。
+
+Inline Question：
+Recall that in an LSTM the input gate $i$, forget gate $f$, and output gate $o$ are all outputs of a sigmoid function. Why don't we use the ReLU activation function instead of sigmoid to compute these values? Explain.
+
+LSTM一般用tanh和sigmoid而不用ReLU，因为可能会出现梯度爆炸的现象。
+梯度消失（vanishing gradient）和梯度爆炸（exploding gradient）
+以往我们担心的是梯度消失，现在要担心的恰好相反。
+LSTM就是要让远处的信息被遗忘掉，而不是一直保持下来。
+
+训练效果：
+(Iteration 1 / 100) loss: 79.551152
+(Iteration 11 / 100) loss: 43.829087
+(Iteration 21 / 100) loss: 30.062725
+(Iteration 31 / 100) loss: 14.019451
+(Iteration 41 / 100) loss: 5.985684
+(Iteration 51 / 100) loss: 1.821248
+(Iteration 61 / 100) loss: 0.641494
+(Iteration 71 / 100) loss: 0.289625
+(Iteration 81 / 100) loss: 0.246940
+(Iteration 91 / 100) loss: 0.133974
